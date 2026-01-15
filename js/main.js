@@ -89,6 +89,58 @@ function stop() {
   stopBtn.disabled = true;
 }
 
+// 게임 모드 시작 함수
+function startGameMode(config) {
+  if (!gameEngine) {
+    console.warn("GameEngine이 초기화되지 않았습니다.");
+    return;
+  }
+
+  // 기존 콜백 제거 (중복 방지)
+  gameEngine.setScoreChangeCallback(null);
+  gameEngine.setGameEndCallback(null);
+
+  gameEngine.setScoreChangeCallback((score, level) => {
+    // console.log(`점수: ${score}, 레벨: ${level}`);
+    const scoreBoard = document.getElementById("label-container");
+    if (scoreBoard) {
+      // 간단하게 첫 번째 요소에 점수 표시 (기존 라벨 덮어쓰기)
+      // 실제로는 별도 UI 요소가 있는 것이 좋으나 템플릿 구조 유지를 위해
+      scoreBoard.childNodes[0].innerText = `점수: ${score} (Lv.${level})`;
+      scoreBoard.childNodes[1].innerText = `남은 시간: ${gameEngine.timeLeft}초`;
+    }
+  });
+
+  gameEngine.setGameEndCallback((finalScore, finalLevel) => {
+    alert(`게임 종료!\n최종 점수: ${finalScore}\n최종 레벨: ${finalLevel}`);
+  });
+
+  gameEngine.start(config);
+}
+
+/**
+ * 포즈 그리기 및 게임 렌더링 콜백
+ * @param {Object} pose - PoseNet 포즈 데이터
+ */
+function drawPose(pose) {
+  if (poseEngine.webcam && poseEngine.webcam.canvas) {
+    // 1. 웹캠 그리기
+    ctx.drawImage(poseEngine.webcam.canvas, 0, 0);
+
+    // 2. 키포인트와 스켈레톤 그리기 (선택)
+    if (pose) {
+      const minPartConfidence = 0.5;
+      tmPose.drawKeypoints(pose.keypoints, minPartConfidence, ctx);
+      tmPose.drawSkeleton(pose.keypoints, minPartConfidence, ctx);
+    }
+
+    // 3. 게임 엔진 업데이트 및 그리기 (게임 활성화 시)
+    if (gameEngine && gameEngine.isGameActive) {
+      gameEngine.updateAndDraw(ctx, canvas.width, canvas.height);
+    }
+  }
+}
+
 /**
  * 예측 결과 처리 콜백
  * @param {Array} predictions - TM 모델의 예측 결과
@@ -98,11 +150,13 @@ function handlePrediction(predictions, pose) {
   // 1. Stabilizer로 예측 안정화
   const stabilized = stabilizer.stabilize(predictions);
 
-  // 2. Label Container 업데이트
-  for (let i = 0; i < predictions.length; i++) {
-    const classPrediction =
-      predictions[i].className + ": " + predictions[i].probability.toFixed(2);
-    labelContainer.childNodes[i].innerHTML = classPrediction;
+  // 2. Label Container 업데이트 (게임 중이 아닐 때만 상세 표시)
+  if (!gameEngine || !gameEngine.isGameActive) {
+    for (let i = 0; i < predictions.length; i++) {
+      const classPrediction =
+        predictions[i].className + ": " + predictions[i].probability.toFixed(2);
+      labelContainer.childNodes[i].innerHTML = classPrediction;
+    }
   }
 
   // 3. 최고 확률 예측 표시
@@ -111,48 +165,7 @@ function handlePrediction(predictions, pose) {
 
   // 4. GameEngine에 포즈 전달 (게임 모드일 경우)
   if (gameEngine && gameEngine.isGameActive && stabilized.className) {
-    gameEngine.onPoseDetected(stabilized.className);
+    // gameEngine.onPoseDetected(stabilized.className); // 구형 메서드
+    gameEngine.setBasketPose(stabilized.className); // 신형 메서드
   }
-}
-
-/**
- * 포즈 그리기 콜백
- * @param {Object} pose - PoseNet 포즈 데이터
- */
-function drawPose(pose) {
-  if (poseEngine.webcam && poseEngine.webcam.canvas) {
-    ctx.drawImage(poseEngine.webcam.canvas, 0, 0);
-
-    // 키포인트와 스켈레톤 그리기
-    if (pose) {
-      const minPartConfidence = 0.5;
-      tmPose.drawKeypoints(pose.keypoints, minPartConfidence, ctx);
-      tmPose.drawSkeleton(pose.keypoints, minPartConfidence, ctx);
-    }
-  }
-}
-
-// 게임 모드 시작 함수 (선택적 - 향후 확장용)
-function startGameMode(config) {
-  if (!gameEngine) {
-    console.warn("GameEngine이 초기화되지 않았습니다.");
-    return;
-  }
-
-  gameEngine.setCommandChangeCallback((command) => {
-    console.log("새로운 명령:", command);
-    // UI 업데이트 로직 추가 가능
-  });
-
-  gameEngine.setScoreChangeCallback((score, level) => {
-    console.log(`점수: ${score}, 레벨: ${level}`);
-    // UI 업데이트 로직 추가 가능
-  });
-
-  gameEngine.setGameEndCallback((finalScore, finalLevel) => {
-    console.log(`게임 종료! 최종 점수: ${finalScore}, 최종 레벨: ${finalLevel}`);
-    alert(`게임 종료!\n최종 점수: ${finalScore}\n최종 레벨: ${finalLevel}`);
-  });
-
-  gameEngine.start(config);
 }
