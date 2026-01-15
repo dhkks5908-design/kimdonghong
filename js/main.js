@@ -12,20 +12,29 @@ let stabilizer;
 let ctx;
 let labelContainer;
 
+// DOM Elements
+const startScreen = document.getElementById("start-screen");
+const gameOverScreen = document.getElementById("game-over-screen");
+const scoreVal = document.getElementById("score-val");
+const levelVal = document.getElementById("level-val");
+const timeVal = document.getElementById("time-val");
+const finalScoreVal = document.getElementById("final-score");
+const gestureFeedback = document.getElementById("gesture-feedback");
+
 /**
- * 애플리케이션 초기화
+ * 애플리케이션 초기화 (Start 버튼 클릭 시)
  */
 async function init() {
   const startBtn = document.getElementById("startBtn");
-  const stopBtn = document.getElementById("stopBtn");
-
   startBtn.disabled = true;
+  startBtn.innerHTML = "로딩 중...";
 
   try {
     // 1. PoseEngine 초기화
     poseEngine = new PoseEngine("./my_model/");
+    // 웹캠 크기를 조금 더 키워서 렌더링
     const { maxPredictions, webcam } = await poseEngine.init({
-      size: 200,
+      size: 400, // 더 큰 해상도
       flip: true
     });
 
@@ -35,88 +44,82 @@ async function init() {
       smoothingFrames: 3
     });
 
-    // 3. GameEngine 초기화 (선택적)
+    // 3. GameEngine 초기화
     gameEngine = new GameEngine();
 
     // 4. 캔버스 설정
     const canvas = document.getElementById("canvas");
-    canvas.width = 200;
-    canvas.height = 200;
+    canvas.width = 400;
+    canvas.height = 400;
     ctx = canvas.getContext("2d");
 
-    // 5. Label Container 설정
+    // 5. 디버그 패널 (선택사항)
     labelContainer = document.getElementById("label-container");
-    labelContainer.innerHTML = ""; // 초기화
-    for (let i = 0; i < maxPredictions; i++) {
-      labelContainer.appendChild(document.createElement("div"));
+    if (labelContainer) {
+      labelContainer.innerHTML = "";
+      for (let i = 0; i < maxPredictions; i++) {
+        labelContainer.appendChild(document.createElement("div"));
+      }
     }
 
     // 6. PoseEngine 콜백 설정
     poseEngine.setPredictionCallback(handlePrediction);
     poseEngine.setDrawCallback(drawPose);
 
-    // 7. PoseEngine 시작
+    // 7. 게임 시작 처리
+    startScreen.classList.remove("active");
     poseEngine.start();
+    startGameMode({ timeLimit: 60 });
 
-    stopBtn.disabled = false;
   } catch (error) {
     console.error("초기화 중 오류 발생:", error);
-    alert("초기화에 실패했습니다. 콘솔을 확인하세요.");
+    alert("초기화에 실패했습니다. 카메라 권한을 확인하세요.");
     startBtn.disabled = false;
+    startBtn.innerHTML = "게임 시작";
   }
 }
 
 /**
- * 애플리케이션 중지
+ * 게임 재시작
  */
-function stop() {
-  const startBtn = document.getElementById("startBtn");
-  const stopBtn = document.getElementById("stopBtn");
-
-  if (poseEngine) {
-    poseEngine.stop();
-  }
-
-  if (gameEngine && gameEngine.isGameActive) {
-    gameEngine.stop();
-  }
-
-  if (stabilizer) {
-    stabilizer.reset();
-  }
-
-  startBtn.disabled = false;
-  stopBtn.disabled = true;
+function restartGame() {
+  gameOverScreen.classList.remove("active");
+  startGameMode({ timeLimit: 60 });
 }
 
-// 게임 모드 시작 함수
+/**
+ * 게임 모드 실행
+ */
 function startGameMode(config) {
-  if (!gameEngine) {
-    console.warn("GameEngine이 초기화되지 않았습니다.");
-    return;
-  }
+  if (!gameEngine) return;
 
-  // 기존 콜백 제거 (중복 방지)
-  gameEngine.setScoreChangeCallback(null);
-  gameEngine.setGameEndCallback(null);
+  // 점수판 초기화
+  scoreVal.innerText = "0";
+  levelVal.innerText = "1";
+  timeVal.innerText = config.timeLimit;
 
+  // 게임 엔진 콜백 설정
   gameEngine.setScoreChangeCallback((score, level) => {
-    // console.log(`점수: ${score}, 레벨: ${level}`);
-    const scoreBoard = document.getElementById("label-container");
-    if (scoreBoard) {
-      // 간단하게 첫 번째 요소에 점수 표시 (기존 라벨 덮어쓰기)
-      // 실제로는 별도 UI 요소가 있는 것이 좋으나 템플릿 구조 유지를 위해
-      scoreBoard.childNodes[0].innerText = `점수: ${score} (Lv.${level})`;
-      scoreBoard.childNodes[1].innerText = `남은 시간: ${gameEngine.timeLeft}초`;
-    }
+    scoreVal.innerText = score;
+    levelVal.innerText = level;
+
+    // 점수 획득 시 피드백 애니메이션 (선택 사항)
+    scoreVal.style.transform = "scale(1.2)";
+    setTimeout(() => scoreVal.style.transform = "scale(1)", 100);
   });
 
+  // 시간 감소 콜백을 위해 별도 인터격 필요하다면 추가 (현재는 loop에서 처리 안하고 engine이 자체 timer 사용)
+  // GameEngine에 시간 업데이트 콜백 추가 필요할 수도 있음. 
+  // 임시로 GameEngine 내부를 수정하지 않고, requestAnimationFrame loop에서 UI 업데이트
+
   gameEngine.setGameEndCallback((finalScore, finalLevel) => {
-    alert(`게임 종료!\n최종 점수: ${finalScore}\n최종 레벨: ${finalLevel}`);
+    finalScoreVal.innerText = finalScore;
+    gameOverScreen.classList.add("active");
   });
 
   gameEngine.start(config);
 }
+
 
 /**
  * 포즈 그리기 및 게임 렌더링 콜백
@@ -125,18 +128,25 @@ function startGameMode(config) {
 function drawPose(pose) {
   if (poseEngine.webcam && poseEngine.webcam.canvas) {
     // 1. 웹캠 그리기
-    ctx.drawImage(poseEngine.webcam.canvas, 0, 0);
+    ctx.drawImage(poseEngine.webcam.canvas, 0, 0, 400, 400);
 
-    // 2. 키포인트와 스켈레톤 그리기 (선택)
+    // 2. 키포인트와 스켈레톤 그리기 (반투명하게)
     if (pose) {
       const minPartConfidence = 0.5;
+      ctx.globalAlpha = 0.3; // 스켈레톤은 배경처럼 흐리게
       tmPose.drawKeypoints(pose.keypoints, minPartConfidence, ctx);
       tmPose.drawSkeleton(pose.keypoints, minPartConfidence, ctx);
+      ctx.globalAlpha = 1.0;
     }
 
     // 3. 게임 엔진 업데이트 및 그리기 (게임 활성화 시)
     if (gameEngine && gameEngine.isGameActive) {
-      gameEngine.updateAndDraw(ctx, canvas.width, canvas.height);
+      gameEngine.updateAndDraw(ctx, 400, 400);
+
+      // UI에 남은 시간 업데이트 (비효율적일 수 있으나 간단히 구현)
+      if (gameEngine.timeLeft >= 0) {
+        timeVal.innerText = gameEngine.timeLeft;
+      }
     }
   }
 }
@@ -150,8 +160,21 @@ function handlePrediction(predictions, pose) {
   // 1. Stabilizer로 예측 안정화
   const stabilized = stabilizer.stabilize(predictions);
 
-  // 2. Label Container 업데이트 (게임 중이 아닐 때만 상세 표시)
-  if (!gameEngine || !gameEngine.isGameActive) {
+  // 2. 피드백 UI 표시
+  if (stabilized.className) {
+    const label = stabilized.className;
+    gestureFeedback.innerText = label;
+    gestureFeedback.classList.add("active");
+
+    // 일정 시간 후 숨김 (연속 감지 시 계속 떠있음)
+    clearTimeout(gestureFeedback.timer);
+    gestureFeedback.timer = setTimeout(() => {
+      gestureFeedback.classList.remove("active");
+    }, 500);
+  }
+
+  // 3. 디버그 패널 업데이트
+  if (document.getElementById("label-container").style.display !== "none") {
     for (let i = 0; i < predictions.length; i++) {
       const classPrediction =
         predictions[i].className + ": " + predictions[i].probability.toFixed(2);
@@ -159,13 +182,9 @@ function handlePrediction(predictions, pose) {
     }
   }
 
-  // 3. 최고 확률 예측 표시
-  const maxPredictionDiv = document.getElementById("max-prediction");
-  maxPredictionDiv.innerHTML = stabilized.className || "감지 중...";
-
-  // 4. GameEngine에 포즈 전달 (게임 모드일 경우)
+  // 4. GameEngine에 포즈 전달
   if (gameEngine && gameEngine.isGameActive && stabilized.className) {
-    // gameEngine.onPoseDetected(stabilized.className); // 구형 메서드
-    gameEngine.setBasketPose(stabilized.className); // 신형 메서드
+    gameEngine.setBasketPose(stabilized.className);
   }
 }
+
